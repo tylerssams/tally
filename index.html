@@ -62,6 +62,11 @@
   .pc-split .sp{flex:1;background:var(--lineSoft);border-radius:11px;padding:9px 12px}
   .pc-split .sp-l{display:block;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
   .pc-split .sp-v{font-weight:750;font-size:15px}
+  .split-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--lineSoft)}
+  .split-row .sr-name{flex:1;font-weight:600;font-size:14px}
+  .split-row .sr-amt{text-align:right}
+  .split-row .sr-amt .num:first-child{font-weight:750;font-size:15px;display:block}
+  .split-row .sr-amt .num:last-child{font-size:11px;color:var(--muted)}
   .meter{height:7px;border-radius:5px;background:var(--lineSoft);margin-top:10px;overflow:hidden}
   .meter > i{display:block;height:100%;border-radius:5px;background:var(--brand)}
 
@@ -304,6 +309,13 @@ function personBreakdown(pid){
   }
   return {own, shared, total:own+shared};
 }
+function sharedSummary(){
+  const sharedTotal = state.bills
+    .filter(b => (b.sharers||[]).filter(personById).length>1)
+    .reduce((a,b)=> a+billMonthly(b), 0);
+  const perPerson = state.people.map(p => ({ id:p.id, name:p.name, shared:personBreakdown(p.id).shared, income:incomeMonthly(p) }));
+  return { sharedTotal, perPerson };
+}
 function totals(){
   const billsTotal = state.bills.reduce((a,b)=>a+billMonthly(b),0);
   const incomeTotal = state.people.reduce((a,p)=>a+incomeMonthly(p),0);
@@ -346,6 +358,26 @@ function viewOverview(){
   const t=totals();
   const people=state.people;
   const cats=categoryTotals();
+  const ss=sharedSummary();
+  const sharedHtml = (people.length>1 && ss.sharedTotal>0) ? `
+  <div class="h-eyebrow">Shared between you</div>
+  <div class="card" style="padding:16px 16px 8px">
+    <div class="pc-top">
+      <div><div class="pc-name">Shared bills</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:2px">${pct(ss.sharedTotal,t.incomeTotal)}% of your combined income</div></div>
+      <div class="pc-pay num">${money(ss.sharedTotal)}<span style="font-size:12px;color:var(--muted);font-weight:500">/mo</span></div>
+    </div>
+    <div class="stackbar" style="margin:13px 0 4px 0">
+      ${ss.perPerson.map((pp,i)=> pp.shared>0?`<i style="width:${pct(pp.shared,ss.sharedTotal)}%;background:${PALETTE[i%PALETTE.length]}"></i>`:"").join("")}
+    </div>
+    ${ss.perPerson.map((pp,i)=>`
+      <div class="split-row">
+        <span class="dot" style="background:${PALETTE[i%PALETTE.length]}"></span>
+        <span class="sr-name">${esc(pp.name)}</span>
+        <span class="sr-amt"><span class="num">${money(pp.shared)}</span>
+          <span class="num">${pct(pp.shared,ss.sharedTotal)}% of the split${pp.income>0?` &middot; ${pct(pp.shared,pp.income)}% of income`:""}</span></span>
+      </div>`).join("")}
+  </div>` : "";
   if(state.bills.length===0 && people.every(p=>incomeMonthly(p)===0)){
     return `<div class="card"><div class="empty">
       <div class="big">Welcome to Tally</div>
@@ -399,6 +431,7 @@ function viewOverview(){
     }).join("")}
   </div>
 
+  ${sharedHtml}
   ${catEntries.length?`
   <div class="h-eyebrow">Where it goes</div>
   <div class="card" style="padding-bottom:6px">
@@ -678,11 +711,18 @@ function buildReport(){
   let splitTable="";
   if(sharedBills.length){
     const cols=state.people;
+    const colSum={}; cols.forEach(p=>colSum[p.id]=0);
+    sharedBills.forEach(b=>{const sh=billShares(b); cols.forEach(p=>{ if(sh[p.id]) colSum[p.id]+=sh[p.id]; });});
+    const sharedAll=Object.values(colSum).reduce((a,x)=>a+x,0);
     splitTable=`<div class="r-sec">Shared bills — who pays what</div>
     <table><thead><tr><th>Bill</th>${cols.map(p=>`<th class="n">${esc(p.name)}</th>`).join("")}</tr></thead><tbody>
     ${sharedBills.map(b=>{const sh=billShares(b);
       return `<tr><td>${esc(b.name||"Untitled")}</td>${cols.map(p=>`<td class="n">${sh[p.id]?money(sh[p.id]):"—"}</td>`).join("")}</tr>`;}).join("")}
-    </tbody></table>`;
+    </tbody>
+    <tfoot>
+      <tr><td style="font-weight:800;border-top:2px solid #111">Total shared</td>${cols.map(p=>`<td class="n" style="font-weight:800;border-top:2px solid #111">${money(colSum[p.id])}</td>`).join("")}</tr>
+      <tr><td style="color:#666">Share of split</td>${cols.map(p=>`<td class="n" style="color:#666">${sharedAll>0?pct(colSum[p.id],sharedAll)+"%":"—"}</td>`).join("")}</tr>
+    </tfoot></table>`;
   }
   document.getElementById("report").innerHTML=`
     <div class="r-h1">Tally — household finances</div>
